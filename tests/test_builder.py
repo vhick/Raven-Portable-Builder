@@ -118,7 +118,17 @@ class BuilderTests(unittest.TestCase):
         self.assertIn('upload-artifact@v6',s)
         self.assertIn('registrytrace-self-test',s)
         self.assertIn('junction-self-test',s)
-    def test_16_upstream_icon_strict(self):
+    def test_16_junction_fixture_is_staged_before_test(self):
+        s=(ROOT/'.github'/'workflows'/'build-portable.yml').read_text()
+        self.assertIn("'work').Path 'Other'",s)
+        self.assertIn("Copy-Item -LiteralPath 'Other/Manage-RavenJunction.ps1'",s)
+        self.assertIn("Test-Path -LiteralPath (Join-Path $testOther 'Manage-RavenJunction.ps1')",s)
+        self.assertLess(s.index("Copy-Item -LiteralPath 'Other/Manage-RavenJunction.ps1'"), s.index('foreach ($test in @('))
+        src=(ROOT/'launcher'/'RavenPortable.cs').read_text()
+        self.assertIn('File.Exists(Script)',src)
+        self.assertIn('junction-self-test.log',src)
+        self.assertIn('Failed phase:',src)
+    def test_17_upstream_icon_strict(self):
         s=(ROOT/'scripts'/'extract_icon.py').read_text()
         self.assertIn('RT_GROUP_ICON',s)
         self.assertIn('RT_ICON',s)

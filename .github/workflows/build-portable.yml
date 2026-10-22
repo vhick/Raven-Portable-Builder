@@ -84,6 +84,14 @@ jobs:
           )
           $icon = (Resolve-Path -LiteralPath 'work/appicon.ico').Path
           $exe = Join-Path (Resolve-Path -LiteralPath 'work').Path 'RavenPortable.exe'
+          # The launcher locates helpers relative to its own executable.
+          # During the build it lives in work/, not yet in the final portable ZIP.
+          $testOther = Join-Path (Resolve-Path -LiteralPath 'work').Path 'Other'
+          New-Item -ItemType Directory -Path $testOther -Force | Out-Null
+          Copy-Item -LiteralPath 'Other/Manage-RavenJunction.ps1' -Destination (Join-Path $testOther 'Manage-RavenJunction.ps1') -Force
+          if (-not (Test-Path -LiteralPath (Join-Path $testOther 'Manage-RavenJunction.ps1') -PathType Leaf)) {
+            throw 'Windows junction test fixture missing: work/Other/Manage-RavenJunction.ps1'
+          }
           & $compiler '/nologo' '/target:winexe' '/platform:x64' '/optimize+' "/out:$exe" "/win32icon:$icon" '/reference:System.Windows.Forms.dll' $sources
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exe)) { throw 'Compiling RavenPortable.exe failed.' }
           foreach ($test in @('--portable-self-test','--traceguard-self-test','--registrytrace-self-test','--junction-self-test')) {
@@ -93,7 +101,15 @@ jobs:
                 try { $p.Kill() } catch { }
                 throw "Headless test $test timed out after 15 seconds."
               }
-              if ($p.ExitCode -ne 0) { throw "Headless test $test FAILED with exit code $($p.ExitCode)." }
+              if ($p.ExitCode -ne 0) {
+                $diagnostic = 'work/junction-self-test.log'
+                if ($test -eq '--junction-self-test' -and (Test-Path -LiteralPath $diagnostic)) {
+                  Write-Host '----- Junction self-test diagnostics -----'
+                  Get-Content -LiteralPath $diagnostic | ForEach-Object { Write-Host $_ }
+                  Write-Host '----- End diagnostics -----'
+                }
+                throw "Headless test $test FAILED with exit code $($p.ExitCode)."
+              }
             } finally { $p.Dispose() }
           }
           if (Test-Path -LiteralPath 'work/Data') { throw 'Self-tests unexpectedly created live user data.' }

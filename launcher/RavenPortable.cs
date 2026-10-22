@@ -173,18 +173,25 @@ internal static class RavenPortable
         string host = Path.Combine(parent, "Host", "Raven");
         string data = Path.Combine(parent, "PortableData", "Raven");
         string marker = Path.Combine(parent, "Trace", "owner.json");
+        string phase = "initialize";
         try
         {
+            if (!File.Exists(Script)) throw new FileNotFoundException("The junction test helper is not beside the launcher: " + Script);
             Directory.CreateDirectory(Path.GetDirectoryName(host));
             Directory.CreateDirectory(data);
             File.WriteAllText(Path.Combine(data,"private.txt"), "preserve");
+            phase = "mount temporary test junction";
             RunJunction("mount", host, data, marker, true);
+            phase = "verify temporary test junction";
             if (!Directory.Exists(host) || (File.GetAttributes(host) & FileAttributes.ReparsePoint) == 0) return 11;
             if (!File.Exists(Path.Combine(host,"private.txt"))) return 12;
+            phase = "unmount temporary test junction";
             RunJunction("unmount", host, data, marker, true);
+            phase = "verify portable data preserved";
             if (Directory.Exists(host)) return 13;
             if (!File.Exists(Path.Combine(data,"private.txt"))) return 14;
             // Pre-existing ordinary folder must not be overwritten.
+            phase = "verify existing host folder protected";
             Directory.CreateDirectory(host);
             File.WriteAllText(Path.Combine(host,"host.txt"), "do not touch");
             bool refused = false;
@@ -192,7 +199,14 @@ internal static class RavenPortable
             if (!refused || !File.Exists(Path.Combine(host,"host.txt"))) return 15;
             return 0;
         }
-        catch { return 99; }
+        catch (Exception ex)
+        {
+            // GitHub compiles as winexe. Write diagnostics to a build-local file,
+            // which the workflow prints on failure. Never hide the real exception again.
+            try { File.WriteAllText(Path.Combine(Root,"junction-self-test.log"),
+                "Failed phase: " + phase + Environment.NewLine + ex.ToString()); } catch { }
+            return 99;
+        }
         finally { try { Directory.Delete(parent, true); } catch { } }
     }
 }

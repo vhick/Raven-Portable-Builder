@@ -54,7 +54,7 @@ CommercialUse=true
 
 [Version]
 PackageVersion=1.0.0.0
-DisplayVersion=Portable Builder 1.0
+DisplayVersion=Portable Builder 1.1
 
 [Control]
 Icons=1

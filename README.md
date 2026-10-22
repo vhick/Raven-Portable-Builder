@@ -1,4 +1,4 @@
-# Raven Portable Builder v1.0
+# Raven Portable Builder v1.1
 
 **Official Raven by mjishnu:** https://github.com/mjishnu/Raven  
 **Custom Windows launcher:** standalone ZIP, not affiliated with Raven's developers.
@@ -62,6 +62,12 @@ It never deletes an existing `%LOCALAPPDATA%\Raven` folder or someone else's jun
 - After moving to a new drive, the launcher recreates its junction against the current `Data` location. Previously stored **absolute download paths** in Raven's JSON may still reference your old drive letter; reselect/retry affected downloads if needed.
 - Avoid Raven's built-in self-update for the Raven client. Update the portable app by rerunning GitHub Actions and replacing only program files.
 - When Raven Portable is open, don't simultaneously run another Raven installation. Wait until downloads and installs finish and exit normally.
+
+## v1.1: Junction self-test repair (October 22, 2026)
+
+The first v1.0 GitHub run downloaded/extracted Raven, extracted its icon, and compiled the launcher, but failed `--junction-self-test` (exit code 99). The test executable is compiled in `work/`, while its junction script was only in the repository's `Other/` folder. The workflow now **copies the real helper to `work/Other/` before testing**, matching the layout of the packaged app. The test also writes `work/junction-self-test.log` with its exact phase/error if it fails, and the workflow prints that diagnostic automatically. This does not modify the portable profile/data or weaken the conservative cleanup safeguards.
+
+Use **a new GitHub Actions run after committing v1.1** (not Re-run jobs on the old commit).
 
 ## Validation
 

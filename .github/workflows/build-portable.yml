@@ -1,0 +1,118 @@
+name: Build Raven Portable (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Official stable Raven version: latest or v1.1.1.0'
+        required: true
+        default: 'latest'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    name: Raven Windows x64 self-contained portable ZIP
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout builder
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install original-icon tooling
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check --no-cache-dir pefile==2024.8.26 Pillow==11.3.0
+          if ($LASTEXITCODE -ne 0) { throw 'Installing icon tooling failed.' }
+
+      - name: Validate builder before download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Builder regression tests failed.' }
+
+      - name: Download original stable Raven self-contained ZIP
+        shell: pwsh
+        env:
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/download_official.py --version "$env:UPSTREAM_TAG" --output 'work/download/RavenOfficial.zip'
+          if ($LASTEXITCODE -ne 0) { throw 'Official Raven release download or verification failed.' }
+
+      - name: Extract official program (without installing)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/unpack_official.py 'work/download/RavenOfficial.zip' 'work/extracted'
+          if ($LASTEXITCODE -ne 0) { throw 'Original release extraction or application discovery failed.' }
+
+      - name: Extract original multi-resolution Raven icon
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = (Get-Content -LiteralPath 'work/source_path.txt' -Raw).Trim()
+          $exe = Get-ChildItem -LiteralPath $source -File | Where-Object { $_.Name -ieq 'Raven.exe' } | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exe) { throw 'Original Raven executable not found.' }
+          python scripts/extract_icon.py "$exe" 'work/appicon.ico'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot extract original Raven icon.' }
+          python scripts/icon_pngs.py 'work/appicon.ico' 'work/icons'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot convert original Raven icon to menu icons.' }
+
+      - name: Compile portable launcher and run Windows TraceGuard tests
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path -LiteralPath $compiler)) { $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'Windows .NET Framework C# compiler is missing.' }
+          $sources = @(
+            (Resolve-Path -LiteralPath 'launcher/RavenPortable.cs').Path,
+            (Resolve-Path -LiteralPath 'launcher/TraceGuard.cs').Path,
+            (Resolve-Path -LiteralPath 'launcher/RegistryTraceGuard.cs').Path
+          )
+          $icon = (Resolve-Path -LiteralPath 'work/appicon.ico').Path
+          $exe = Join-Path (Resolve-Path -LiteralPath 'work').Path 'RavenPortable.exe'
+          & $compiler '/nologo' '/target:winexe' '/platform:x64' '/optimize+' "/out:$exe" "/win32icon:$icon" '/reference:System.Windows.Forms.dll' $sources
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exe)) { throw 'Compiling RavenPortable.exe failed.' }
+          foreach ($test in @('--portable-self-test','--traceguard-self-test','--registrytrace-self-test','--junction-self-test')) {
+            $p = Start-Process -FilePath $exe -ArgumentList $test -PassThru -ErrorAction Stop
+            try {
+              if (-not $p.WaitForExit(15000)) {
+                try { $p.Kill() } catch { }
+                throw "Headless test $test timed out after 15 seconds."
+              }
+              if ($p.ExitCode -ne 0) { throw "Headless test $test FAILED with exit code $($p.ExitCode)." }
+            } finally { $p.Dispose() }
+          }
+          if (Test-Path -LiteralPath 'work/Data') { throw 'Self-tests unexpectedly created live user data.' }
+          Write-Host 'All 4 Windows launcher/TraceGuard self-tests passed.'
+
+      - name: Verify final single portable ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/package_app.py
+          if ($LASTEXITCODE -ne 0) { throw 'Application package step failed.' }
+          python scripts/verify_package.py
+          if ($LASTEXITCODE -ne 0) { throw 'ZIP layout verification failed.' }
+
+      - name: Upload ZIP-only artifact (retained one day)
+        uses: actions/upload-artifact@v6
+        with:
+          name: Raven-Portable-Windows-x64
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
